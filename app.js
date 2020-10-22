@@ -4,7 +4,12 @@ import morgan from "morgan";
 import cors from "cors";
 import path from "path";
 import "./config/MongoConnect.js";
-
+import productRouter from "./Routers/ProductRouter.js";
+import categoryRouter from "./Routers/CategoryRouters.js";
+import usersRouter from "./Routers/UserRouters.js";
+import ordersRouter from "./Routers/OrdersRouters.js";
+import authJwt from "./helpers/jwt.js";
+import errorHandler from "./helpers/error-handler.js";
 
 dotenv.config();
 const app = express();
@@ -23,7 +28,10 @@ const api = process.env.API_URL;
 const Port = process.env.PORT;
 
 // ROUTERS
-
+app.use(`${api}/products`, productRouter);
+app.use(`${api}/categories`, categoryRouter);
+app.use(`${api}/users`, usersRouter);
+app.use(`${api}/orders`, ordersRouter);
 
 // development
 // app.listen(Port, () => {
