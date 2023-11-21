@@ -1,13 +1,19 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import Users from "../models/userModels.js";
+import User from "../models/userModels.js";
+import Game from "../models/GameModel.js";
+import { protect, admin } from "../helpers/AuthMiddleware.js";
+import moment from "moment";
+import House from "../models/HouseModels.js";
 
-const usersRouter = express.Router();
+const UserRouter = express.Router();
 
-// GET ALL USERS
-usersRouter.get("/", async (req, res) => {
-  const userList = await Users.find().select("-passwordHash");
+// GET ALL User
+UserRouter.get("/", protect, admin, async (req, res) => {
+  let filter = { room: req.user.room }
+
+  const userList = await User.find(filter).select("-passwordHash");
 
   if (!userList) {
     res.status(500).json({ success: false });
@@ -16,30 +22,27 @@ usersRouter.get("/", async (req, res) => {
 });
 
 // GET USER BY ID
-usersRouter.get("/:id", async (req, res) => {
-  const user = await Users.findById(req.params.id).select("-passwordHash");
+// UserRouter.get("/:id", async (req, res) => {
+//   const user = await User.findById(req.params.id).select("-passwordHash");
 
-  if (!user) {
-    res
-      .status(500)
-      .json({ message: "The user with the given ID was not found." });
-  }
-  res.status(200).send(user);
-});
+//   if (!user) {
+//     res
+//       .status(500)
+//       .json({ message: "The user with the given ID was not found." });
+//   }
+//   res.status(200).send(user);
+// });
 
 // ADMIN CREATE USER
-usersRouter.post("/", async (req, res) => {
-  let user = new Users({
+UserRouter.post("/", protect, admin, async (req, res) => {
+  let room = req.user.room
+
+  let user = new User({
     name: req.body.name,
-    email: req.body.email,
     passwordHash: bcrypt.hashSync(req.body.password, 10),
-    phone: req.body.phone,
-    isAdmin: req.body.isAdmin,
-    street: req.body.street,
-    apartment: req.body.apartment,
-    zip: req.body.zip,
-    city: req.body.city,
-    country: req.body.country,
+    isAdmin: false,
+    room
+
   });
   user = await user.save();
 
@@ -49,8 +52,9 @@ usersRouter.post("/", async (req, res) => {
 });
 
 // LOGIN USER
-usersRouter.post("/login", async (req, res) => {
-  const user = await Users.findOne({ email: req.body.email });
+UserRouter.post("/login", async (req, res) => {
+  console.log(req.body)
+  const user = await User.findOne({ name: req.body.name });
   const secret = process.env.secret;
   if (!user) {
     return res.status(400).send("The user not found");
@@ -66,36 +70,45 @@ usersRouter.post("/login", async (req, res) => {
       { expiresIn: "1w" }
     );
 
-    res.status(200).send({ user: user.email, token: token });
+    res.status(200).send({ name: user.name, id: user.id, token: token, isAdmin: user.isAdmin, isSuperAdmin: user.isSuperAdmin });
   } else {
     res.status(400).send("password is wrong!");
   }
 });
 
 // REGISTER USER
-usersRouter.post("/register", async (req, res) => {
-  let user = new User({
-    name: req.body.name,
-    email: req.body.email,
-    passwordHash: bcrypt.hashSync(req.body.password, 10),
-    phone: req.body.phone,
-    isAdmin: req.body.isAdmin,
-    street: req.body.street,
-    apartment: req.body.apartment,
-    zip: req.body.zip,
-    city: req.body.city,
-    country: req.body.country,
-  });
-  user = await user.save();
+UserRouter.post("/register", protect, async (req, res) => {
+  let userfound = await User.find({ name: req.body.name })
+  console.log(userfound)
+  if (!userfound.length) {
+    console.log(req.user)
+    let room = req.user.room
 
-  if (!user) return res.status(400).send("the user cannot be created!");
+    console.log('user is now registering')
+    let user = new User({
+      name: req.body.name,
 
-  res.send(user);
+      passwordHash: bcrypt.hashSync(req.body.password, 10),
+
+      isAdmin: req.body.isAdmin ? req.body.isAdmin : false,
+      room
+
+    });
+    let usertosend = await user.save();
+
+    if (!usertosend) return res.status(400).send("the user cannot be created!");
+
+    else res.send(usertosend);
+  }
+  else {
+    console.log('the user was found')
+    return res.status(400).send("the user cannot be created!");
+  }
 });
 
 // DELETE USER
-usersRouter.delete("/:id", (req, res) => {
-  Users.findByIdAndRemove(req.params.id)
+UserRouter.delete("/:id", protect, admin, (req, res) => {
+  User.findByIdAndRemove(req.params.id)
     .then((user) => {
       if (user) {
         return res
@@ -113,8 +126,8 @@ usersRouter.delete("/:id", (req, res) => {
 });
 
 // UPDATE USER
-usersRouter.put("/:id", async (req, res) => {
-  const userExist = await Users.findById(req.params.id);
+UserRouter.put("/:id", async (req, res) => {
+  const userExist = await User.findById(req.params.id);
   let newPassword;
   if (req.body.password) {
     newPassword = bcrypt.hashSync(req.body.password, 10);
@@ -122,7 +135,7 @@ usersRouter.put("/:id", async (req, res) => {
     newPassword = userExist.passwordHash;
   }
 
-  const user = await Users.findByIdAndUpdate(
+  const user = await User.findByIdAndUpdate(
     req.params.id,
     {
       name: req.body.name,
@@ -144,15 +157,112 @@ usersRouter.put("/:id", async (req, res) => {
   res.send(user);
 });
 
-// TOTAL USERS
-usersRouter.get(`/get/count`, async (req, res) => {
-  const userCount = await Users.countDocuments((count) => count);
+// TOTAL User
+UserRouter.get('/cashiers', protect, admin, async (req, res) => {
+  let room = req.user.room
+  console.log(room)
+  const cashiers = await User.find({ isAdmin: false, isSuperAdmin: false, room });
+  console.log(cashiers)
 
-  if (!userCount) {
+  if (!cashiers) {
     res.status(500).json({ success: false });
   }
-  res.send({
-    userCount: userCount,
-  });
+  res.send(cashiers);
 });
-export default usersRouter;
+UserRouter.get('/analytics/getall', protect, admin, async (req, res) => {
+  let role = req.user.role
+  console.log('this is working')
+  const games = await Game.countDocuments();
+  const users = await User.countDocuments();
+  var todaystart = moment().startOf('day');
+  // end today
+  var thismonthstart = moment().startOf('month');   // set to the first of this month, 12:00 am
+  var thisyearstart = moment().startOf('year');   // set to the first of this month, 12:00 am
+  var thisweekstart = moment().startOf('week');
+  var end = moment(todaystart).endOf('day');
+
+  const todaygame = await Game.find({ dateCreated: { '$gte': todaystart, '$lte': end } })
+  const thisweekgame = await Game.find({ dateCreated: { '$gte': thisweekstart, '$lte': end } })
+  const thismonthgame = await Game.find({ dateCreated: { '$gte': thismonthstart, '$lte': end } })
+  const todayuser = await User.find({ dateCreated: { '$gte': todaystart, '$lte': end } })
+  const thisweekuser = await User.find({ dateCreated: { '$gte': thisweekstart, '$lte': end } })
+  const thismonthuser = await User.find({ dateCreated: { '$gte': thismonthstart, '$lte': end } })
+  const thisyearuser = await User.find({ dateCreated: { '$gte': thisyearstart, '$lte': end } })
+  //users,
+  //games,
+  if (users) {
+    res.json({
+      users,
+      games,
+      todaygame,
+      thisweekgame,
+      thismonthgame,
+      todayuser,
+      thisweekuser,
+      thismonthuser,
+      thisyearuser
+    })
+  }
+  else {
+
+    res.status(404).json({
+      message: "Error on sending"
+    })
+  }
+});
+UserRouter.get('/analytics/getcustom', protect, async (req, res) => {
+  console.log(' this is good')
+  const { startdate, enddate } = req.query
+  console.log(startdate)
+  console.log(enddate)
+  // console.log(req.user)
+  let isAdmin = req.user.isAdmin
+  let isSuperAdmin = req.user.isSuperAdmin
+  let isCahier = !req.user.isAdmin && !req.user.isSuperAdmin
+  if (isSuperAdmin) {
+    console.log('super admin found')
+    const user = await User.find({ dateCreated: { '$gte': startdate, '$lte': enddate } })
+    const game = await Game.find({ dateCreated: { '$gte': startdate, '$lte': enddate } })
+    const house = await House.find({ dateCreated: { '$gte': startdate, '$lte': enddate } })
+
+    res.json({
+      user: user.length, game, house
+    }
+    )
+    // total houses 
+    // total earnings
+    // toal games 
+  }
+  else if (isAdmin) {
+    let room = req.user.room
+    console.log('super admin found')
+    const user = await User.find({ dateCreated: { '$gte': startdate, '$lte': enddate }, room })
+    const game = await Game.find({ dateCreated: { '$gte': startdate, '$lte': enddate }, room })
+
+    res.json({
+      user: user.length, game
+    }
+    )
+    // total houses 
+    // total earnings
+    // toal games 
+  }
+  else if (isCahier) {
+    let room = req.user.room
+    let id = req.use._id.toString()
+
+
+    console.log('super admin found')
+    const game = await Game.find({ dateCreated: { '$gte': startdate, '$lte': enddate }, room, postedby: id })
+
+    res.json({
+      game
+    }
+    )
+    // total houses 
+    // total earnings
+    // toal games 
+  }
+
+});
+export default UserRouter;
